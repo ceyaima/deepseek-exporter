@@ -19,7 +19,5 @@ you can check a sample of the generated files [here](https://github.com/ceyaima/
 
 ## Installation
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
-2. Download `deepseek-exporter.user.js` from the [Releases page](https://github.com/ceyaima/deepseek-exporter/releases/) or the repo
-3. Open your chosen userscript manager
-4. Upload the downloaded script
-
+2. Navigate to `deepseek-exporter.user.js` in the repo
+3. Click `Raw`
