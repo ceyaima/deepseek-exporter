@@ -15,9 +15,9 @@ based on logic of code from [BlakeHansen130 v0.0.6](https://greasyfork.org/en/sc
 - HTML files default to the branch with the longest chain of messages
 
 you can check a sample of the generated files [here](https://github.com/ceyaima/deepseek-exporter/tree/main/samples)
-> the prompts used for the sample was taken from eqbench.com
+> the prompts used for the sample were taken from eqbench.com
 
 ## Installation
-1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
+1. Install [Tampermonkey](https://www.tampermonkey.net/)
 2. Navigate to `deepseek-exporter.user.js` in the repo
 3. Click `Raw`
