@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         deepseek exporter
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  export deepseek chats in bulk as json or html
 // @author       ceyaima
 // @match        https://chat.deepseek.com/*
@@ -24,6 +24,80 @@
         info: (msg) => console.log(`[DeepSeek Saver] ${msg}`),
         error: (msg, e) => console.error(`[DeepSeek Saver] ${msg}`, e)
     };
+
+    // -------------------------------
+    // AUTO-SCROLL FUNCTIONALITY
+    // -------------------------------
+    async function loadAllChatsInSidebar() {
+        return new Promise((resolve) => {
+            const scrollContainer = document.querySelector('._6d215eb.ds-scroll-area');
+            if (!scrollContainer) {
+                log.info('No scrollable sidebar container found');
+                resolve();
+                return;
+            }
+
+            log.info('Starting enhanced auto-scroll to load all chats...');
+
+            let lastChatCount = 0;
+            let currentChatCount = 0;
+            let scrollAttempts = 0;
+            const maxScrollAttempts = 50; // Increased from 20
+            const scrollDelay = 800; // Increased delay for slower loading
+            let consecutiveNoChange = 0;
+            const maxConsecutiveNoChange = 5; // Require 5 consecutive no-changes to stop
+
+            function scrollAndCheck() {
+                currentChatCount = document.querySelectorAll('._83421f9[tabindex="0"]').length;
+
+                log.info(`Scroll ${scrollAttempts}: ${currentChatCount} chats (Previous: ${lastChatCount})`);
+
+                // Check if we've reached a stable state
+                if (currentChatCount === lastChatCount) {
+                    consecutiveNoChange++;
+                    log.info(`No change detected (${consecutiveNoChange}/${maxConsecutiveNoChange})`);
+
+                    if (consecutiveNoChange >= maxConsecutiveNoChange) {
+                        log.info(`All chats loaded. Total: ${currentChatCount}`);
+                        resolve();
+                        return;
+                    }
+                } else {
+                    consecutiveNoChange = 0; // Reset counter when we see new content
+                }
+
+                // Safety check for max attempts
+                if (scrollAttempts >= maxScrollAttempts) {
+                    log.info(`Max scroll attempts reached. Loaded ${currentChatCount} chats`);
+                    resolve();
+                    return;
+                }
+
+                lastChatCount = currentChatCount;
+                scrollAttempts++;
+
+                // Enhanced scrolling - try different scroll strategies
+                const scrollHeight = scrollContainer.scrollHeight;
+                const clientHeight = scrollContainer.clientHeight;
+                const scrollTop = scrollContainer.scrollTop;
+
+                // Strategy 1: Scroll to very bottom
+                scrollContainer.scrollTop = scrollHeight;
+
+                // Strategy 2: If already near bottom, try scrolling by smaller increments
+                if (scrollHeight - scrollTop - clientHeight < 100) {
+                    // We're near bottom, try scrolling by viewport height
+                    scrollContainer.scrollTop += clientHeight * 0.7;
+                }
+
+                // Wait longer for content to load, then check again
+                setTimeout(scrollAndCheck, scrollDelay);
+            }
+
+            // Start the scroll process
+            scrollAndCheck();
+        });
+    }
 
     // -------------------------------
     // HELPER FUNCTIONS FOR HTML EXPORT
@@ -478,15 +552,24 @@
     // EXPORT ALL CHATS FUNCTION
     // -------------------------------
     async function exportAllChats() {
+        log.info('Starting export all chats process...');
+
+        // First, load all chats by auto-scrolling the sidebar
+        await loadAllChatsInSidebar();
+
         const zip = new JSZip();
-        const chatElements = Array.from(document.querySelectorAll('._83421f9[tabindex="0"]'));
+        const chatElements = Array.from(document.querySelectorAll('._546d736'));
+
         if (!chatElements.length) {
             alert('No chat items found in the sidebar.');
             return;
         }
+
         log.info(`Found ${chatElements.length} chats to export.`);
+
         // Retrieve the saved export format from localStorage; default to json if not set.
         const exportFormat = localStorage.getItem("exportAllFormat") || "json";
+
         for (const chatEl of chatElements) {
             chatEl.click();
             state.targetResponse = null;
@@ -596,10 +679,3 @@
         log.info('DeepSeek Saver script with hover dropdown export and persistent Export All format started');
     });
 })();
-
-
-
-
-
-
-
