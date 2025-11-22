@@ -115,9 +115,18 @@
         var chatId = jsonData.data.biz_data.chat_session.id;
         var allMessages = jsonData.data.biz_data.chat_messages;
 
+        // FIX: The new JSON puts text in 'fragments', so we construct 'content' from that
+        allMessages.forEach(function(m) {
+            if (m.fragments) {
+                m.content = m.fragments.map(function(f) { return f.content; }).join('\n\n');
+            } else {
+                m.content = "";
+            }
+        });
+
         // Filter out unwanted messages
         var filteredMessages = allMessages.filter(function(m) {
-            var trimmed = m.content.trim();
+            var trimmed = (m.content || "").trim();
             return trimmed !== "The server is busy. Please try again later." && trimmed !== "";
         });
 
@@ -207,17 +216,18 @@
         htmlOutput.push("<meta name='viewport' content='width=device-width, initial-scale=1.0'>");
         htmlOutput.push("<title>" + chatTitle + "</title>");
         htmlOutput.push("<style>");
-        htmlOutput.push("body { font-family: 'Verdana', sans-serif; margin: 0; padding: 0; background-color: #292a2d; font-size: 11.5pt; line-height: 1.70; }");
-        htmlOutput.push("h1 { text-align: center; color: #ccc; line-height: 1.2; font-size: 22pt; padding-bottom: 10px; }");
-        htmlOutput.push("h4 { color: #6f7680; text-align: center; font-family: 'Consolas', sans-serif; line-height: 0.5; font-size: 13pt; }");
-        htmlOutput.push("::-webkit-scrollbar { width: 15px; }");
-        htmlOutput.push("::-webkit-scrollbar-track { background: #292a2d; }");
-        htmlOutput.push("::-webkit-scrollbar-thumb { background: #434057; }");
+        htmlOutput.push("@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');")
+        htmlOutput.push("body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; background-color: #151517; font-size: 11.5pt; line-height: 1.70; }");
+        htmlOutput.push("h1 { text-align: center; color: #ccc; line-height: 1.2; font-size: 22pt; padding-bottom: 10px; margin-top: 30px; }");
+        htmlOutput.push("h4 { color: #6f7680; text-align: center; font-family: 'Consolas', monospaced; font-size: 13pt; margin: 0; }");
+        htmlOutput.push("::-webkit-scrollbar { width: 10px; }");
+        htmlOutput.push("::-webkit-scrollbar-track { background: #151517; }");
+        htmlOutput.push("::-webkit-scrollbar-thumb { background: #2c2c2e; }");
         htmlOutput.push("::-webkit-scrollbar-hover { background: #262431; }");
-        htmlOutput.push(".chat-container { width: 50%; margin: 20px auto; }");
+        htmlOutput.push(".chat-container { max-width: 800px; margin: 20px auto; padding: 0 20px; }");
         htmlOutput.push(".message-box { color: #e5e5e5; margin: 10px 0; margin-bottom: 40px; padding: 15px 25px; border-radius: 20px; max-width: 90%; position: relative; }");
-        htmlOutput.push(".user-message { background-color: #434057; text-align: left; margin-left: auto; margin-right: 0; }");
-        htmlOutput.push(".assistant-message { background-color: #292a2d; margin-left: 0; margin-right: auto; margin-bottom: 40px; }");
+        htmlOutput.push(".user-message { background-color: #2c2c2e; text-align: left; margin-left: auto; margin-right: 0; }");
+        htmlOutput.push(".assistant-message { margin-left: 0; margin-right: auto; margin-bottom: 40px; }");
         htmlOutput.push(".toggle-container { margin: 5px 0 10px 0; font-size: 0.9em; color: #e5e5e5; }");
         htmlOutput.push(".toggle-container.assistant-toggle { text-align: left; }");
         htmlOutput.push(".toggle-container.user-toggle { text-align: right; }");
@@ -232,7 +242,8 @@
         htmlOutput.push("<h4>id: " + chatId + "</h4>");
         var createdStr = new Date(chatCreated * 1000).toISOString().slice(0,19).replace("T", " ");
         var updatedStr = new Date(chatUpdated * 1000).toISOString().slice(0,19).replace("T", " ");
-        htmlOutput.push("<em><h4>chat created: " + createdStr + " // chat updated: " + updatedStr + "</h4></em>");
+        htmlOutput.push("<em><h4>chat created: " + createdStr + "</h4></em>");
+        htmlOutput.push("<em><h4>chat updated: " + updatedStr + "</h4></em>");
 
         var globalEditGroupId = 0;
         function escapeContent(text) {
