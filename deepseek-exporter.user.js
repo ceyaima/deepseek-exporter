@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         deepseek exporter
 // @namespace    http://tampermonkey.net/
-// @version      0.2
-// @description  export deepseek chats in bulk as json or html
+// @version      1.0
+// @description  export deepseek chats in bulk as tree json, raw json, or html
 // @author       ceyaima
 // @match        https://chat.deepseek.com/*
 // @grant        none
@@ -42,17 +42,16 @@
             let lastChatCount = 0;
             let currentChatCount = 0;
             let scrollAttempts = 0;
-            const maxScrollAttempts = 50; // Increased from 20
-            const scrollDelay = 800; // Increased delay for slower loading
+            const maxScrollAttempts = 50;
+            const scrollDelay = 800;
             let consecutiveNoChange = 0;
-            const maxConsecutiveNoChange = 5; // Require 5 consecutive no-changes to stop
+            const maxConsecutiveNoChange = 5;
 
             function scrollAndCheck() {
                 currentChatCount = document.querySelectorAll('._83421f9[tabindex="0"]').length;
 
                 log.info(`Scroll ${scrollAttempts}: ${currentChatCount} chats (Previous: ${lastChatCount})`);
 
-                // Check if we've reached a stable state
                 if (currentChatCount === lastChatCount) {
                     consecutiveNoChange++;
                     log.info(`No change detected (${consecutiveNoChange}/${maxConsecutiveNoChange})`);
@@ -63,10 +62,9 @@
                         return;
                     }
                 } else {
-                    consecutiveNoChange = 0; // Reset counter when we see new content
+                    consecutiveNoChange = 0;
                 }
 
-                // Safety check for max attempts
                 if (scrollAttempts >= maxScrollAttempts) {
                     log.info(`Max scroll attempts reached. Loaded ${currentChatCount} chats`);
                     resolve();
@@ -76,27 +74,139 @@
                 lastChatCount = currentChatCount;
                 scrollAttempts++;
 
-                // Enhanced scrolling - try different scroll strategies
                 const scrollHeight = scrollContainer.scrollHeight;
                 const clientHeight = scrollContainer.clientHeight;
                 const scrollTop = scrollContainer.scrollTop;
 
-                // Strategy 1: Scroll to very bottom
                 scrollContainer.scrollTop = scrollHeight;
 
-                // Strategy 2: If already near bottom, try scrolling by smaller increments
                 if (scrollHeight - scrollTop - clientHeight < 100) {
-                    // We're near bottom, try scrolling by viewport height
                     scrollContainer.scrollTop += clientHeight * 0.7;
                 }
 
-                // Wait longer for content to load, then check again
                 setTimeout(scrollAndCheck, scrollDelay);
             }
 
-            // Start the scroll process
             scrollAndCheck();
         });
+    }
+
+    // -------------------------------
+    // PYTHON SCRIPT LOGIC PORT (JSON TREE)
+    // -------------------------------
+    function parseMessageData(msg) {
+        // Extracts and separates 'thinking' content from 'response' content.
+        let thoughtParts = [];
+        let contentParts = [];
+
+        // Check for fragments
+        if (msg.fragments && Array.isArray(msg.fragments)) {
+            msg.fragments.forEach(frag => {
+                const text = frag.content || "";
+                const fragType = frag.type || "";
+
+                if (fragType === "THINK") {
+                    thoughtParts.push(text);
+                } else {
+                    // Assume anything not marked THINK is part of the content
+                    contentParts.push(text);
+                }
+            });
+        }
+
+        // Fallback: if no fragments processed, use direct content
+        if (contentParts.length === 0 && thoughtParts.length === 0 && msg.content) {
+            const val = msg.content;
+            if (val) {
+                contentParts.push(String(val));
+            }
+        }
+
+        const thoughtStr = thoughtParts.join("\n").trim();
+        const contentStr = contentParts.join("\n").trim();
+
+        return {
+            thought: thoughtStr.length > 0 ? thoughtStr : null,
+            content: contentStr
+        };
+    }
+
+    function generateChatTree(jsonString) {
+        let jsonData;
+        try {
+            jsonData = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
+        } catch (e) {
+            console.error("Failed to parse JSON for tree generation", e);
+            return [];
+        }
+
+        const bizData = jsonData.data && jsonData.data.biz_data ? jsonData.data.biz_data : {};
+        const allMessages = bizData.chat_messages || [];
+
+        const processedMessages = [];
+
+        for (const m of allMessages) {
+            const parsed = parseMessageData(m);
+
+            // Filter out server busy messages
+            if (parsed.content === "The server is busy. Please try again later.") {
+                continue;
+            }
+            if (!parsed.content && !parsed.thought) {
+                continue;
+            }
+
+            processedMessages.push({
+                id: m.message_id,
+                parent_id: m.parent_id,
+                role: m.role,
+                content: parsed.content,
+                thought: parsed.thought
+            });
+        }
+
+        // Group children by parent_id
+        const childrenByParent = {};
+        for (const msg of processedMessages) {
+            const pid = msg.parent_id;
+            if (!childrenByParent[pid]) {
+                childrenByParent[pid] = [];
+            }
+            childrenByParent[pid].push(msg);
+        }
+
+        function buildNode(currentMsg) {
+            const node = {
+                id: currentMsg.id,
+                type: (currentMsg.role || "").toLowerCase(), // 'user' or 'assistant'
+                content: currentMsg.content,
+                thought: currentMsg.thought, // null if no thought
+                children: []
+            };
+
+            // Find children
+            const myId = currentMsg.id;
+            const children = childrenByParent[myId] || [];
+
+            // Sort children by ID (chronological)
+            children.sort((a, b) => a.id - b.id);
+
+            for (const child of children) {
+                node.children.push(buildNode(child));
+            }
+
+            return node;
+        }
+
+        // Find roots (Messages with parent_id = null)
+        const rootMessages = childrenByParent[null] || [];
+
+        const forest = [];
+        for (const root of rootMessages) {
+            forest.append ? forest.append(buildNode(root)) : forest.push(buildNode(root));
+        }
+
+        return forest;
     }
 
     // -------------------------------
@@ -115,7 +225,7 @@
         var chatId = jsonData.data.biz_data.chat_session.id;
         var allMessages = jsonData.data.biz_data.chat_messages;
 
-        // FIX: The new JSON puts text in 'fragments', so we construct 'content' from that
+        // Construct 'content' from fragments for HTML view
         allMessages.forEach(function(m) {
             if (m.fragments) {
                 m.content = m.fragments
@@ -368,7 +478,7 @@
         return htmlOutput.join("\n");
     }
     // -------------------------------
-    // END OF HTML EXPORT FUNCTIONS
+    // END OF EXPORT FUNCTIONS
     // -------------------------------
 
     // -------------------------------
@@ -438,7 +548,7 @@
             fontSize: '14px'
         };
 
-        // CSS for export container & dropdown (only visible on hover)
+        // CSS for export container & dropdown
         const containerCSS = `
             .export-container {
                 position: relative;
@@ -466,7 +576,6 @@
                 display: block;
             }
         `;
-        // Inject the style if not already present
         if (!document.getElementById('exportDropdownStyles')) {
             let styleEl = document.createElement('style');
             styleEl.id = 'exportDropdownStyles';
@@ -474,28 +583,34 @@
             document.head.appendChild(styleEl);
         }
 
-        // Helper: create an export container for a given button text and click callback per export option.
+        // Helper: create an export container for a given button text and click callback
         function createExportContainer(buttonText, exportHandler) {
             const container = document.createElement('div');
             container.className = 'export-container';
-            // Create export button (no onclick; the dropdown options trigger export)
             const btn = document.createElement('button');
             btn.innerText = buttonText;
             Object.assign(btn.style, buttonStyles);
             container.appendChild(btn);
 
-            // Create dropdown with options
             const dropdown = document.createElement('div');
             dropdown.className = 'export-dropdown';
-            // Option: JSON
+
+            const optionRawJSON = document.createElement('div');
+            optionRawJSON.innerText = "RAW";
+            optionRawJSON.onclick = function(e) {
+                e.stopPropagation();
+                exportHandler("raw_json");
+            };
+            dropdown.appendChild(optionRawJSON);
+
             const optionJSON = document.createElement('div');
             optionJSON.innerText = "JSON";
             optionJSON.onclick = function(e) {
                 e.stopPropagation();
-                exportHandler("json");
+                exportHandler("tree_json");
             };
             dropdown.appendChild(optionJSON);
-            // Option: HTML
+
             const optionHTML = document.createElement('div');
             optionHTML.innerText = "HTML";
             optionHTML.onclick = function(e) {
@@ -503,6 +618,7 @@
                 exportHandler("html");
             };
             dropdown.appendChild(optionHTML);
+
             container.appendChild(dropdown);
             return container;
         }
@@ -520,15 +636,33 @@
                     const jsonData = JSON.parse(state.targetResponse);
                     let chatTitle = jsonData.data.biz_data.chat_session.title || 'Untitled Chat';
                     chatTitle = chatTitle.replace(/[\/\\?%*:|"<>]/g, '-');
-                    if (format === "json") {
+
+                    if (format === "tree_json") {
+                        // Generate Tree JSON (Formatted)
+                        const treeData = generateChatTree(state.targetResponse);
                         const fileName = `DeepSeek - ${chatTitle}_${timestamp}.json`;
-                        const blob = new Blob([state.targetResponse], { type: 'application/json' });
+                        // Using null, 2 for readable formatting
+                        const blob = new Blob([JSON.stringify(treeData, null, 2)], { type: 'application/json' });
                         const link = document.createElement('a');
                         link.href = URL.createObjectURL(blob);
                         link.download = fileName;
                         link.click();
                         log.info(`Successfully downloaded file: ${fileName}`);
+
+                    } else if (format === "raw_json") {
+                        // Export Raw JSON (Formatted)
+                        const fileName = `DeepSeek - ${chatTitle}_raw_${timestamp}.json`;
+                        // Parse and Re-stringify to ensure it is readable/formatted
+                        const formattedRaw = JSON.stringify(JSON.parse(state.targetResponse), null, 2);
+                        const blob = new Blob([formattedRaw], { type: 'application/json' });
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = fileName;
+                        link.click();
+                        log.info(`Successfully downloaded file: ${fileName}`);
+
                     } else if (format === "html") {
+                        // Export HTML
                         const htmlData = generateChatHTML(jsonData);
                         const fileName = `DeepSeek - ${chatTitle}_${timestamp}.html`;
                         const blob = new Blob([htmlData], { type: 'text/html' });
@@ -546,11 +680,10 @@
             buttonContainer.appendChild(chatExportContainer);
             updateButtonStatus();
         }
+
         // For non-chat pages: Export All
         const exportAllContainer = createExportContainer("Export All", function(format) {
-            // Save the chosen format to localStorage so that after reload exportAllChats() uses it.
             localStorage.setItem("exportAllFormat", format);
-            // Reload is necessary.
             localStorage.setItem("exportAllAfterReload", "true");
             location.replace("https://chat.deepseek.com");
         });
@@ -570,15 +703,11 @@
     async function exportAllChats() {
         log.info('Starting export all chats process...');
 
-        // First, load all chats by auto-scrolling the sidebar
         await loadAllChatsInSidebar();
 
         const zip = new JSZip();
-
-        // --- normal ---
         let chatElements = Array.from(document.querySelectorAll('._546d736'));
 
-        // --- case 1 ---
         if (chatElements.length === 0) {
             const divAttempt2 = document.querySelector('.b8812f16.a2f3d50e._70b689f');
             if (divAttempt2) {
@@ -589,10 +718,8 @@
             }
         }
 
-        // --- case 2 ---
         if (chatElements.length === 0) {
-            console.log("Attempt 2 failed. Retrying with fix #2...");
-            const divAttempt3 = document.querySelector('.dc04ec1d.a02af2e6');
+             const divAttempt3 = document.querySelector('.dc04ec1d.a02af2e6');
             if (divAttempt3) {
                 divAttempt3.classList.remove('a02af2e6');
                 await delay(1000);
@@ -601,7 +728,6 @@
             }
         }
 
-        // final check
         if (!chatElements.length) {
             alert('No chat items found in the sidebar after 3 attempts.');
             return;
@@ -609,8 +735,8 @@
 
         log.info(`Found ${chatElements.length} chats to export.`);
 
-        // Retrieve the saved export format from localStorage; default to json if not set.
-        const exportFormat = localStorage.getItem("exportAllFormat") || "json";
+        // Default to "tree_json" if "json" was selected, or "raw_json" if specified
+        const exportFormat = localStorage.getItem("exportAllFormat") || "tree_json";
 
         for (const chatEl of chatElements) {
             chatEl.click();
@@ -627,15 +753,29 @@
                     chatTitle = chatTitle.replace(/[\/\\?%*:|"<>]/g, '-');
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
                     let fileName;
-                    if (exportFormat === "json") {
+
+                    if (exportFormat === "tree_json") {
+                        // Tree JSON (Formatted)
+                        const treeData = generateChatTree(state.targetResponse);
                         fileName = `${chatTitle}_${timestamp}.json`;
-                        zip.file(fileName, state.targetResponse);
-                        log.info(`Added ${fileName} to zip`);
+                        // Indent = 2
+                        zip.file(fileName, JSON.stringify(treeData, null, 2));
+                        log.info(`Added ${fileName} to zip (Tree JSON)`);
+
+                    } else if (exportFormat === "raw_json") {
+                        // Raw JSON (Formatted)
+                        fileName = `${chatTitle}_raw_${timestamp}.json`;
+                        // Parse and stringify with indent 2
+                        const formattedRaw = JSON.stringify(JSON.parse(state.targetResponse), null, 2);
+                        zip.file(fileName, formattedRaw);
+                        log.info(`Added ${fileName} to zip (Raw JSON)`);
+
                     } else if (exportFormat === "html") {
+                        // HTML
                         fileName = `${chatTitle}_${timestamp}.html`;
                         const htmlData = generateChatHTML(jsonData);
                         zip.file(fileName, htmlData);
-                        log.info(`Added ${fileName} to zip`);
+                        log.info(`Added ${fileName} to zip (HTML)`);
                     }
                 } catch(e) {
                     log.error("Error parsing JSON for a chat", e);
@@ -700,13 +840,12 @@
     });
 
     // -------------------------------
-    // ON WINDOW LOAD: CREATE BUTTONS & CHECK FOR EXPORT ALL FLAG
+    // ON WINDOW LOAD
     // -------------------------------
     window.addEventListener('load', function() {
         createButtons();
         if (localStorage.getItem("exportAllAfterReload") === "true") {
             localStorage.removeItem("exportAllAfterReload");
-            // If exportAllFormat is set, run exportAllChats after reload.
             setTimeout(() => {
                 exportAllChats();
             }, 1000);
@@ -718,6 +857,6 @@
             }
         });
         observer.observe(document.body, { childList: true, subtree: true });
-        log.info('DeepSeek Saver script with hover dropdown export and persistent Export All format started');
+        log.info('DeepSeek Saver script initialized (Formatted JSON supported).');
     });
 })();
