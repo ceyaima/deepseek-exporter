@@ -118,7 +118,12 @@
         // FIX: The new JSON puts text in 'fragments', so we construct 'content' from that
         allMessages.forEach(function(m) {
             if (m.fragments) {
-                m.content = m.fragments.map(function(f) { return f.content; }).join('\n\n');
+                m.content = m.fragments
+                    .filter(function(f) {
+                        return f.type === "RESPONSE" || f.type === "REQUEST";
+                    })
+                    .map(function(f) { return f.content; })
+                    .join('\n\n');
             } else {
                 m.content = "";
             }
@@ -569,10 +574,36 @@
         await loadAllChatsInSidebar();
 
         const zip = new JSZip();
-        const chatElements = Array.from(document.querySelectorAll('._546d736'));
 
+        // --- normal ---
+        let chatElements = Array.from(document.querySelectorAll('._546d736'));
+
+        // --- case 1 ---
+        if (chatElements.length === 0) {
+            const divAttempt2 = document.querySelector('.b8812f16.a2f3d50e._70b689f');
+            if (divAttempt2) {
+                divAttempt2.classList.remove('_70b689f');
+                await delay(1000);
+                await loadAllChatsInSidebar();
+                chatElements = Array.from(document.querySelectorAll('._546d736'));
+            }
+        }
+
+        // --- case 2 ---
+        if (chatElements.length === 0) {
+            console.log("Attempt 2 failed. Retrying with fix #2...");
+            const divAttempt3 = document.querySelector('.dc04ec1d.a02af2e6');
+            if (divAttempt3) {
+                divAttempt3.classList.remove('a02af2e6');
+                await delay(1000);
+                await loadAllChatsInSidebar();
+                chatElements = Array.from(document.querySelectorAll('._546d736'));
+            }
+        }
+
+        // final check
         if (!chatElements.length) {
-            alert('No chat items found in the sidebar.');
+            alert('No chat items found in the sidebar after 3 attempts.');
             return;
         }
 
