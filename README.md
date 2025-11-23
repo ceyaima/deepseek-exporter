@@ -7,14 +7,15 @@ based on logic of code from [BlakeHansen130 v0.0.6](https://greasyfork.org/en/sc
 3. Click `Raw`
 
 ## Current Features
-- exporting individual chats as RAW, JSON, or HTML
+- exporting individual chats as RAW, JSON, HTML, or MD
   - RAW (raw json) will be the format deepseek stores its chats in
   - JSON (tree json) will translate the raw json into an n-ary tree format
   - HTML will translate the json into a readable, interactive page
     - formatted with css and js that *attempts* to look like deepseek
     - default to the branch with the longest chain of messages
-- all file types will include regenerations and edits
-- all json files will include "thinking" text
+  - MD files will include basic styling
+  - file types that support "thought" text: RAW, JSON, MD
+  - file types that support regenerations and edits: RAW, JSON, HTML
 - exporting chats in any available file type in bulk
   - the script will be manually cycling though your chats, so don't be alarmed if deepseek starts switching chats on its own
   - if your sidebar is not currently visible, the script will force it open
