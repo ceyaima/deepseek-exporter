@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         deepseek exporter
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  export deepseek chats in bulk as tree json, raw json, or html
+// @version      1.1
+// @description  export deepseek chats in bulk as tree json, raw json, html, or markdown
 // @author       ceyaima
 // @match        https://chat.deepseek.com/*
 // @grant        none
@@ -95,11 +95,9 @@
     // PYTHON SCRIPT LOGIC PORT (JSON TREE)
     // -------------------------------
     function parseMessageData(msg) {
-        // Extracts and separates 'thinking' content from 'response' content.
         let thoughtParts = [];
         let contentParts = [];
 
-        // Check for fragments
         if (msg.fragments && Array.isArray(msg.fragments)) {
             msg.fragments.forEach(frag => {
                 const text = frag.content || "";
@@ -108,13 +106,11 @@
                 if (fragType === "THINK") {
                     thoughtParts.push(text);
                 } else {
-                    // Assume anything not marked THINK is part of the content
                     contentParts.push(text);
                 }
             });
         }
 
-        // Fallback: if no fragments processed, use direct content
         if (contentParts.length === 0 && thoughtParts.length === 0 && msg.content) {
             const val = msg.content;
             if (val) {
@@ -148,7 +144,6 @@
         for (const m of allMessages) {
             const parsed = parseMessageData(m);
 
-            // Filter out server busy messages
             if (parsed.content === "The server is busy. Please try again later.") {
                 continue;
             }
@@ -165,7 +160,6 @@
             });
         }
 
-        // Group children by parent_id
         const childrenByParent = {};
         for (const msg of processedMessages) {
             const pid = msg.parent_id;
@@ -178,17 +172,15 @@
         function buildNode(currentMsg) {
             const node = {
                 id: currentMsg.id,
-                type: (currentMsg.role || "").toLowerCase(), // 'user' or 'assistant'
+                type: (currentMsg.role || "").toLowerCase(),
                 content: currentMsg.content,
-                thought: currentMsg.thought, // null if no thought
+                thought: currentMsg.thought,
                 children: []
             };
 
-            // Find children
             const myId = currentMsg.id;
             const children = childrenByParent[myId] || [];
 
-            // Sort children by ID (chronological)
             children.sort((a, b) => a.id - b.id);
 
             for (const child of children) {
@@ -198,15 +190,84 @@
             return node;
         }
 
-        // Find roots (Messages with parent_id = null)
         const rootMessages = childrenByParent[null] || [];
-
         const forest = [];
         for (const root of rootMessages) {
-            forest.append ? forest.append(buildNode(root)) : forest.push(buildNode(root));
+            if (forest.append) { forest.append(buildNode(root)); } else { forest.push(buildNode(root)); }
         }
 
         return forest;
+    }
+
+    // -------------------------------
+    // MARKDOWN EXPORT FUNCTION
+    // -------------------------------
+    function generateChatMarkdown(jsonString) {
+        const forest = generateChatTree(jsonString);
+        let jsonData;
+        try {
+            jsonData = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
+        } catch (e) { return ""; }
+
+        const title = jsonData.data.biz_data.chat_session.title || "Chat Export";
+
+        if (!forest || forest.length === 0) return `# ${title}\n\n(No messages found)`;
+
+        // Helper to calculate depth of a node
+        function getDepth(node) {
+            if (!node.children || node.children.length === 0) return 1;
+            // Get max depth of children
+            return 1 + Math.max(...node.children.map(getDepth));
+        }
+
+        // Helper to retrieve the single longest branch as a flat array
+        function getLongestFlatChain(node) {
+            let chain = [node];
+            if (!node.children || node.children.length === 0) {
+                return chain;
+            }
+
+            // Find the child with the greatest depth
+            let maxDepth = -1;
+            let bestChild = null;
+
+            for (const child of node.children) {
+                const d = getDepth(child);
+                if (d > maxDepth) {
+                    maxDepth = d;
+                    bestChild = child;
+                }
+            }
+
+            if (bestChild) {
+                chain = chain.concat(getLongestFlatChain(bestChild));
+            }
+            return chain;
+        }
+
+        // We assume the first root is the main conversation start
+        const flatMessages = getLongestFlatChain(forest[0]);
+
+        let mdOutput = `# ${title}\n\n`;
+
+        flatMessages.forEach(msg => {
+            const role = msg.type === 'user' ? 'User' : 'Assistant';
+
+            mdOutput += `## ${role}\n\n`;
+
+            if (msg.thought) {
+                mdOutput += `**Thought**\n`;
+                mdOutput += `### Thought Process\n`;
+                // Blockquote the thought process
+                const quotedThought = msg.thought.split('\n').map(line => `> ${line}`).join('\n');
+                mdOutput += `${quotedThought}\n\n`;
+            }
+
+            mdOutput += `${msg.content}\n\n`;
+            mdOutput += `---\n\n`;
+        });
+
+        return mdOutput;
     }
 
     // -------------------------------
@@ -218,14 +279,12 @@
     }
 
     function generateChatHTML(jsonData) {
-        // Extract chat metadata and messages
         var chatTitle = jsonData.data.biz_data.chat_session.title;
         var chatCreated = jsonData.data.biz_data.chat_session.inserted_at;
         var chatUpdated = jsonData.data.biz_data.chat_session.updated_at;
         var chatId = jsonData.data.biz_data.chat_session.id;
         var allMessages = jsonData.data.biz_data.chat_messages;
 
-        // Construct 'content' from fragments for HTML view
         allMessages.forEach(function(m) {
             if (m.fragments) {
                 m.content = m.fragments
@@ -239,13 +298,11 @@
             }
         });
 
-        // Filter out unwanted messages
         var filteredMessages = allMessages.filter(function(m) {
             var trimmed = (m.content || "").trim();
             return trimmed !== "The server is busy. Please try again later." && trimmed !== "";
         });
 
-        // Group messages by parent_id
         var childrenByParent = {};
         filteredMessages.forEach(function(msg) {
             var pid = msg.parent_id;
@@ -263,7 +320,6 @@
             return arr;
         }
 
-        // Recursively build conversation structure
         function buildConversationStructure(userMsg) {
             var structure = {
                 type: "user",
@@ -322,7 +378,6 @@
         }
         var defaultRootIndex = conversationTrees.length ? defaultBranchIndex(conversationTrees) : 0;
 
-        // Build the HTML output step by step
         var htmlOutput = [];
         htmlOutput.push("<!DOCTYPE html>");
         htmlOutput.push("<html>");
@@ -533,7 +588,6 @@
         }
         buttonContainer.innerHTML = '';
 
-        // Common button style
         const buttonStyles = {
             padding: '8px 12px',
             backgroundColor: '#434057',
@@ -548,7 +602,6 @@
             fontSize: '14px'
         };
 
-        // CSS for export container & dropdown
         const containerCSS = `
             .export-container {
                 position: relative;
@@ -583,7 +636,6 @@
             document.head.appendChild(styleEl);
         }
 
-        // Helper: create an export container for a given button text and click callback
         function createExportContainer(buttonText, exportHandler) {
             const container = document.createElement('div');
             container.className = 'export-container';
@@ -619,12 +671,19 @@
             };
             dropdown.appendChild(optionHTML);
 
+            const optionMarkdown = document.createElement('div');
+            optionMarkdown.innerText = "MD";
+            optionMarkdown.onclick = function(e) {
+                e.stopPropagation();
+                exportHandler("markdown");
+            };
+            dropdown.appendChild(optionMarkdown);
+
             container.appendChild(dropdown);
             return container;
         }
 
         const currentURL = window.location.href;
-        // For chat session pages:
         if (/^https:\/\/chat\.deepseek\.com\/a\/chat\/s\//.test(currentURL)) {
             const chatExportContainer = createExportContainer("Export Chat", function(format) {
                 if (!state.targetResponse) {
@@ -638,10 +697,8 @@
                     chatTitle = chatTitle.replace(/[\/\\?%*:|"<>]/g, '-');
 
                     if (format === "tree_json") {
-                        // Generate Tree JSON (Formatted)
                         const treeData = generateChatTree(state.targetResponse);
                         const fileName = `DeepSeek - ${chatTitle}_${timestamp}.json`;
-                        // Using null, 2 for readable formatting
                         const blob = new Blob([JSON.stringify(treeData, null, 2)], { type: 'application/json' });
                         const link = document.createElement('a');
                         link.href = URL.createObjectURL(blob);
@@ -650,9 +707,7 @@
                         log.info(`Successfully downloaded file: ${fileName}`);
 
                     } else if (format === "raw_json") {
-                        // Export Raw JSON (Formatted)
                         const fileName = `DeepSeek - ${chatTitle}_raw_${timestamp}.json`;
-                        // Parse and Re-stringify to ensure it is readable/formatted
                         const formattedRaw = JSON.stringify(JSON.parse(state.targetResponse), null, 2);
                         const blob = new Blob([formattedRaw], { type: 'application/json' });
                         const link = document.createElement('a');
@@ -662,10 +717,19 @@
                         log.info(`Successfully downloaded file: ${fileName}`);
 
                     } else if (format === "html") {
-                        // Export HTML
                         const htmlData = generateChatHTML(jsonData);
                         const fileName = `DeepSeek - ${chatTitle}_${timestamp}.html`;
                         const blob = new Blob([htmlData], { type: 'text/html' });
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = fileName;
+                        link.click();
+                        log.info(`Successfully downloaded file: ${fileName}`);
+
+                    } else if (format === "markdown") {
+                        const mdData = generateChatMarkdown(state.targetResponse);
+                        const fileName = `DeepSeek - ${chatTitle}_${timestamp}.md`;
+                        const blob = new Blob([mdData], { type: 'text/markdown' });
                         const link = document.createElement('a');
                         link.href = URL.createObjectURL(blob);
                         link.download = fileName;
@@ -681,7 +745,6 @@
             updateButtonStatus();
         }
 
-        // For non-chat pages: Export All
         const exportAllContainer = createExportContainer("Export All", function(format) {
             localStorage.setItem("exportAllFormat", format);
             localStorage.setItem("exportAllAfterReload", "true");
@@ -735,7 +798,6 @@
 
         log.info(`Found ${chatElements.length} chats to export.`);
 
-        // Default to "tree_json" if "json" was selected, or "raw_json" if specified
         const exportFormat = localStorage.getItem("exportAllFormat") || "tree_json";
 
         for (const chatEl of chatElements) {
@@ -755,27 +817,28 @@
                     let fileName;
 
                     if (exportFormat === "tree_json") {
-                        // Tree JSON (Formatted)
                         const treeData = generateChatTree(state.targetResponse);
                         fileName = `${chatTitle}_${timestamp}.json`;
-                        // Indent = 2
                         zip.file(fileName, JSON.stringify(treeData, null, 2));
                         log.info(`Added ${fileName} to zip (Tree JSON)`);
 
                     } else if (exportFormat === "raw_json") {
-                        // Raw JSON (Formatted)
                         fileName = `${chatTitle}_raw_${timestamp}.json`;
-                        // Parse and stringify with indent 2
                         const formattedRaw = JSON.stringify(JSON.parse(state.targetResponse), null, 2);
                         zip.file(fileName, formattedRaw);
                         log.info(`Added ${fileName} to zip (Raw JSON)`);
 
                     } else if (exportFormat === "html") {
-                        // HTML
                         fileName = `${chatTitle}_${timestamp}.html`;
                         const htmlData = generateChatHTML(jsonData);
                         zip.file(fileName, htmlData);
                         log.info(`Added ${fileName} to zip (HTML)`);
+
+                    } else if (exportFormat === "markdown") {
+                        fileName = `${chatTitle}_${timestamp}.md`;
+                        const mdData = generateChatMarkdown(state.targetResponse);
+                        zip.file(fileName, mdData);
+                        log.info(`Added ${fileName} to zip (Markdown)`);
                     }
                 } catch(e) {
                     log.error("Error parsing JSON for a chat", e);
@@ -857,6 +920,6 @@
             }
         });
         observer.observe(document.body, { childList: true, subtree: true });
-        log.info('DeepSeek Saver script initialized (Formatted JSON supported).');
+        log.info('DeepSeek Saver script initialized (Formatted JSON, HTML, Markdown supported).');
     });
 })();
