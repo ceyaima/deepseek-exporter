@@ -8,6 +8,9 @@ based on logic of code from [BlakeHansen130 v0.0.6](https://greasyfork.org/en/sc
 
 ## Current Features
 - exporting individual chats as RAW, JSON, HTML, or MD
+- exporting chats in any available file type in bulk
+  - the script will be manually cycling though your chats, so don't be alarmed if deepseek starts switching chats on its own
+  - if your sidebar is not currently visible, the script will force it open
 
 | name | filetype | thinking text | regenerations/edits | samples |
 | -----|----------| --------------| --------------------| -------|
@@ -18,12 +21,6 @@ based on logic of code from [BlakeHansen130 v0.0.6](https://greasyfork.org/en/sc
 
 `prompts for samples by eqbench.com`
 `json previews by jsoncrack.com`
-
-- exporting chats in any available file type in bulk
-  - the script will be manually cycling though your chats, so don't be alarmed if deepseek starts switching chats on its own
-  - if your sidebar is not currently visible, the script will force it open
-
-
 
 ## Known Issues and Fixes
 <i>for now, every known issue can be solved by refreshing the page and trying again</i>
